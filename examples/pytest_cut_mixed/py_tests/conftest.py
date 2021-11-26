@@ -6,13 +6,8 @@ import siot
 
 
 @pytest.fixture(scope='session', autouse=True)
-def _enable_logging():
-    # Enable the execution logging
-    siot.load_logger()
-
-
-@pytest.fixture(scope='session', autouse=True)
 def _build_project(tmp_path_factory):
+    siot.load_logger()
     build = tmp_path_factory.mktemp("build")
     siot.build_using_cmake(build)
 

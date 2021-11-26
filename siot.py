@@ -211,7 +211,7 @@ class Workspace:
 
 class Executable:
     def __init__(self, executable: Path, workspace: 'Workspace' = None):
-        self.exe: Path = Path(executable)
+        self.exe: Path = self._resolve_exec(Path(executable))
         self.workspace: Workspace = workspace
 
     def execute(self, params: 'ExecParams' = None, args: List[str] = None,
@@ -221,6 +221,19 @@ class Executable:
         if params is None:
             params = ExecParams(args=args, stdin=stdin, **kwargs)
         return self.workspace.execute(self.exe, params)
+
+    @classmethod
+    def _resolve_exec(cls, path: Path) -> Optional[Path]:
+        """Hacky way to resolve windows executable (with exe suffix)
+        :param path:
+        :return:
+        """
+        if path.exists():
+            return path
+        name = path.name
+        folder = path.resolve().parent
+        win_exe = folder / f"{name}.exe"
+        return win_exe if win_exe.exists() else None
 
 
 class CommandResult:
@@ -249,8 +262,12 @@ class CommandResult:
 
 
 def build_using_cmake(path: Path):
+    """Build the solution using cmake
+    :param path:
+    :return:
+    """
     ws = Workspace(path)
-    res = ws.execute('cmake', args=['-Bbuild'])
+    res = ws.execute('cmake', args=['-Bbuild', '-G', 'Unix Makefiles'])
     if res.exit != 0:
         LOG.error("Unable to build using cmake")
         raise RuntimeError("Command failed: cmake")

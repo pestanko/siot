@@ -135,3 +135,19 @@ cd examples/unittest_echocat
 # Execute the tests
 python -m unittest tests/*.py
 ```
+
+### Test Scenario with build and [`cut.h`](https://github.com/spito/testing)
+
+This test scenario is using unit testing with [`cut.h`](https://github.com/spito/testing)
+and the io testing using the helper - it will also build a solution using ``cmake`` and `make`
+
+The scenario can be found here: [examples/pytest_cut_mixed](examples/pytest_cut_mixed)
+
+
+```shell
+cp siot.py examples/pytest_cut_mixed/
+cd examples/pytest_cut_mixed
+
+# Execute the tests
+pytest
+```
