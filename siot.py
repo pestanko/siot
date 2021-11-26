@@ -1,54 +1,53 @@
 #! /usr/bin/env python3
-
-
+import datetime
 import enum
+import filecmp
 import inspect
 import logging
+import logging.config
 import os
 import subprocess
 import time
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Union
 
-PYTHON_REQUIRED = "3.7"
+PYTHON_REQUIRED = "3.8"
 VERSION = '0.0.1-alpha'
 __version__ = VERSION
 NAME = "siot"
+
+# Logging specific stuff
 LOG = logging.getLogger(NAME)
 
+TRACE = 5
+logging.addLevelName(TRACE, 'TRACE')
 
-class AsDict:
-    """Helper class for the "nicer" serialization - converting objects to the dictionaries
-    """
 
-    def as_dict(self, params: Dict = None) -> Dict:
-        data = obj_get_props_dict(self)
-        if params:
-            data.update(params)
-        return data
+def log_trace(self, msg, *args, **kwargs):
+    self.log(TRACE, msg, *args, **kwargs)
 
-    def d_serialize(self) -> Dict:
-        return dict_serialize(self.as_dict())
 
-    def __str__(self) -> str:
-        return str(self.d_serialize())
+logging.Logger.trace = log_trace
 
-    def __repr__(self):
-        return self.__str__()
 
+# Base classes
 
 class Content:
     def __init__(self, text: str = None, binary: bytes = None, file: Path = None):
         self._text: str = text
         self._binary: bytes = binary
-        self.file = Path(file) if file else None
+        self._file = Path(file) if file else None
+
+    @property
+    def file(self) -> Optional[Path]:
+        return self._file if self._file and self._file.exists() else None
 
     def text(self, encoding='utf-8') -> Optional[str]:
         if self._text is not None:
             return self._text
         if self._binary is not None:
             return self._binary.decode(encoding)
-        if self.file and self.file.exists():
+        if self.file:
             return self.file.read_text(encoding)
         return None
 
@@ -57,9 +56,29 @@ class Content:
             return self._binary
         if self._text is not None:
             return self._text.encode(encoding)
-        if self.file and self.file.exists():
+        if self.file:
             return self.file.read_bytes()
         return None
+
+    def size(self) -> int:
+        if self.file:
+            return self.file.stat().st_size
+        if self._text:
+            return len(self._text)
+        if self._binary:
+            return len(self._binary)
+        return 0
+
+    def assert_content(self, other: 'Content'):
+        if other.file and self.file:
+            assert filecmp.cmp(str(other.file), str(self.file))
+        if other._text is not None or self._text is not None:
+            assert self.text() == other.text()
+        if other._binary is not None or self._binary is not None:
+            assert self.binary() == other.binary()
+
+    def compare_file(self, file: Union[str, Path]) -> bool:
+        return Content(file=file) == self
 
     def is_empty(self) -> bool:
         return (not self.file and not self._text and not self._binary) or not self.binary()
@@ -67,10 +86,31 @@ class Content:
     def is_blank(self) -> bool:
         return self.is_empty() or not self.text().strip()
 
+    def __eq__(self, other: 'Content') -> bool:
+        if other.file is not None and self.file is not None:
+            return filecmp.cmp(other.file, self.file)
+        return self.binary() == other.binary()
+
+    def __str__(self):
+        if self.is_empty():
+            return "Content::EMPTY"
+        if self.is_blank():
+            return "Content::BLANK"
+        if self.file:
+            return f'Content::FILE("{self.file}")'
+        if self._text:
+            return f'Content::TEXT("{self._text}")'
+        if self._binary:
+            return f'Content::BIN("{self._binary}")'
+        return "Content::EMPTY"
+
+    def __repr__(self) -> str:
+        return str(self)
+
 
 class ExecParams:
     def __init__(self, args: List[str] = None, stdin: 'Content' = None, env: Dict[str, str] = None, **kwargs):
-        self.args = args if args else []
+        self.args = [str(arg) for arg in args] if args else []
         self.stdin: Optional[Content] = stdin
         self.env: Dict[str, str] = {k: str(v) for k, v in env.items()} if env else {}
         self.other = kwargs if kwargs else {}
@@ -87,6 +127,7 @@ class Workspace:
         return exe
 
     def execute(self, exec_path: Path, params: 'ExecParams' = None) -> 'CommandResult':
+        LOG.info("[EXEC] Executing \"%s\" with workspace path \"%s\"", exec_path, self.ws_path)
         params = params if params is not None else ExecParams()
         res = execute_cmd(
             str(exec_path),
@@ -109,7 +150,7 @@ class Executable:
         return self.workspace.execute(self.exe, params)
 
 
-class CommandResult(AsDict):
+class CommandResult:
     def __init__(self, exit_code: int, stdout: Path, stderr: Path, elapsed: int):
         self.exit: int = exit_code
         self.stdout: Path = stdout
@@ -122,13 +163,16 @@ class CommandResult(AsDict):
     def err(self) -> Content:
         return Content(file=self.stderr)
 
-    def as_dict(self, params: Dict = None) -> Dict:
-        return {
+    def __str__(self) -> str:
+        return str({
             'exit': self.exit,
             'stdout': str(self.stdout),
             'stderr': str(self.stderr),
             'elapsed': self.elapsed,
-        }
+        })
+
+    def __repr__(self) -> str:
+        return str(self)
 
 
 # Utils
@@ -144,15 +188,16 @@ def execute_cmd(cmd: str, args: List[str], ws: Path, stdin: Content = None,
     log.info("[CMD] Exec: '%s' with args %s", cmd, str(args))
     log.debug(" -> [CMD] Exec STDIN: '%s'", stdin if stdin else "EMPTY")
     log.trace(" -> [CMD] Exec with timeout %d, cwd: '%s'", timeout, cwd)
-    nm = nm or cmd
+    if not nm:
+        nm = cmd.split('/')[-1] + "_" + datetime.datetime.now().isoformat("_").replace(':', '-')
     stdout = stdout or ws / f'{nm}.stdout'
     stderr = stderr or ws / f'{nm}.stderr'
 
     full_env = {**os.environ, **(env or {})}
 
     with stdout.open('w') as fd_out, stderr.open('w') as fd_err:
-        fd_in = Path(stdin).open('r') if stdin and stdin.file else None
-        _input = stdin.binary() if stdin else None
+        fd_in = Path(stdin.file).open('r') if stdin and stdin.file else None
+        _input = stdin.binary() if fd_in is None and stdin else None
         start_time = time.perf_counter_ns()
         try:
             cmd_prefix = cmd_prefix if cmd_prefix else []
@@ -214,10 +259,46 @@ def dict_serialize(obj, as_dict_skip: bool = False) -> Any:
     if isinstance(obj, enum.Enum):
         return obj.value
 
-    if not as_dict_skip and isinstance(obj, AsDict):
-        return obj.as_dict()
-
     if hasattr(obj, '__dict__'):
         return {k: dict_serialize(v) for k, v in obj.__dict__.items()}
 
     return str(obj)
+
+
+def load_logger(level: str = 'INFO', log_file: Optional[Path] = None, file_level: str = None):
+    level = level.upper()
+    file_level = file_level.upper() if file_level else level
+    log_config = {
+        'version': 1,
+        'disable_existing_loggers': False,
+        'formatters': {
+            'verbose': {
+                'format': '%(levelname)s %(asctime)s %(module)s %(message)s'
+            },
+            'single': {
+                'format': '%(levelname)s %(message)s'
+            },
+        },
+        'handlers': {
+            'console': {
+                'level': 'TRACE',
+                'class': 'logging.StreamHandler',
+                'formatter': 'single'
+            },
+        },
+        'loggers': {
+            NAME: {
+                'handlers': ['console'],
+                'level': level,
+            }
+        }
+    }
+    if log_file and log_file.parent.exists():
+        log_config['handlers']['file'] = {
+            'level': file_level,
+            'class': 'logging.FileHandler',
+            'formatter': 'verbose',
+            'filename': str(log_file)
+        }
+        log_config['loggers'][NAME]['handlers'].append('file')
+    logging.config.dictConfig(log_config)
