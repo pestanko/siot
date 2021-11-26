@@ -6,6 +6,7 @@ import inspect
 import logging
 import logging.config
 import os
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -280,7 +281,10 @@ def build_using_cmake(ws_path: Path, sources: Path = None):
     """
     sources = Path(sources) if sources else Path.cwd()
     ws = Workspace(ws_path)
-    ws.req_exec('cmake', args=['-Bbuild', '-G', 'Unix Makefiles'], cwd=sources)
+    build_system = 'Unix Makefiles'
+    if shutil.which('ninja'):
+        build_system = 'Ninja'
+    ws.req_exec('cmake', args=['-Bbuild', '-G', build_system], cwd=sources)
     ws.req_exec('cmake', args=['--build', 'build'], cwd=sources)
 
 
