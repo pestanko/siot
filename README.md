@@ -11,7 +11,7 @@ folder.
 
 ```shell
 cd <TO YOUR DIRECTORY>
-wget https://raw.github.com/pestanko/siot/siot.py
+wget https://raw.githubusercontent.com/pestanko/siot/master/siot.py 
 ```
 
 And you can start developing tests.
