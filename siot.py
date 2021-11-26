@@ -189,24 +189,32 @@ class Workspace:
         self.execs.append(exe)
         return exe
 
-    def execute(self, exec_path: Path, params: 'ExecParams' = None, **kw) -> 'CommandResult':
+    def execute(self, cmd: Union[Path, str], params: 'ExecParams' = None, **kw) -> 'CommandResult':
         """Execute the command/executable and store its outputs to the workspace
-        :param exec_path: Location of the executable
+        :param cmd: Location of the executable
         :param params: Additional parameters (args, env, stdin)
         :param kw: optional arguments that will be passed to the params
         :return: Execution result
         """
         params = params if params else ExecParams(**kw)
-        LOG.info("[EXEC] Executing \"%s\" with workspace path \"%s\"", exec_path, self.ws_path)
+        LOG.info("[EXEC] Executing \"%s\" with workspace path \"%s\"", cmd, self.ws_path)
         params = params if params is not None else ExecParams()
         res = execute_cmd(
-            str(exec_path),
+            str(cmd),
             args=params.args,
             stdin=params.stdin,
             ws=self.ws_path,
             **params.other,
         )
         return res
+
+    def req_exec(self, cmd: Union[Path, str], params: 'ExecParams' = None, **kw):
+        res = self.execute(cmd, params, **kw)
+        if res.exit != 0:
+            LOG.error(f"Unable to build using {cmd}[status={res.exit}]: {res}")
+            LOG.warning("STDOUT: %s", res.out().text())
+            LOG.warning("STDERR: %s", res.err().text())
+            raise RuntimeError(f"Command failed: {cmd}")
 
 
 class Executable:
@@ -261,20 +269,25 @@ class CommandResult:
         return str(self)
 
 
-def build_using_cmake(path: Path):
+def build_using_cmake(ws_path: Path, sources: Path = None):
     """Build the solution using cmake
-    :param path:
+    :param sources:
+    :param ws_path:
     :return:
     """
-    ws = Workspace(path)
-    res = ws.execute('cmake', args=['-Bbuild', '-G', 'Unix Makefiles'])
+    sources = Path(sources) if sources else Path.cwd()
+    ws = Workspace(ws_path)
+    ws.req_exec('cmake', args=['-Bbuild'], cwd=sources)
+    ws.req_exec('cmake', args=['--build', 'build'], cwd=sources)
+
+
+def _build_exec(ws: Workspace, cmd: str, args: List[str]):
+    res = ws.execute(cmd, args=args)
     if res.exit != 0:
-        LOG.error("Unable to build using cmake")
-        raise RuntimeError("Command failed: cmake")
-    res = ws.execute('make', args=['-Cbuild'])
-    if res.exit != 0:
-        LOG.error("Unable to build using make")
-        raise RuntimeError("Command failed: make")
+        LOG.error(f"Unable to build using {cmd}[status={res.exit}]: {res}")
+        LOG.warning("STDOUT: %s", res.out().text())
+        LOG.warning("STDERR: %s", res.err().text())
+        raise RuntimeError(f"Command failed: {cmd}")
 
 
 # Utils
