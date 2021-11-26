@@ -1,4 +1,6 @@
-# Simple Input Output Testing Helper
+# Simple Input Output Testing Helper (SIOT)
+
+Build status: ![SIOT Tests Pipeline](https://github.com/pestanko/siot/actions/workflows/tests.yml/badge.svg)
 
 This simple helper provides simple wrappers over file execution, see the [examples](/examples)
 
