@@ -224,7 +224,8 @@ class Executable:
 
     def execute(self, params: 'ExecParams' = None, args: List[str] = None,
                 stdin: Content = None, **kwargs) -> 'CommandResult':
-        if not self.exe.exists():
+        LOG.info(f"EXEC: {self.exe}")
+        if not self.exe or not self.exe.exists():
             raise FileNotFoundError(str(self.exe))
         if params is None:
             params = ExecParams(args=args, stdin=stdin, **kwargs)
@@ -241,7 +242,9 @@ class Executable:
         name = path.name
         folder = path.resolve().parent
         win_exe = folder / f"{name}.exe"
-        return win_exe if win_exe.exists() else None
+        if win_exe:
+            return win_exe
+        raise FileNotFoundError(f"Unable to find: {path}")
 
 
 class CommandResult:
@@ -277,7 +280,7 @@ def build_using_cmake(ws_path: Path, sources: Path = None):
     """
     sources = Path(sources) if sources else Path.cwd()
     ws = Workspace(ws_path)
-    ws.req_exec('cmake', args=['-Bbuild'], cwd=sources)
+    ws.req_exec('cmake', args=['-Bbuild', '-G', 'Unix Makefiles'], cwd=sources)
     ws.req_exec('cmake', args=['--build', 'build'], cwd=sources)
 
 
@@ -340,7 +343,7 @@ def execute_cmd(cmd: str, args: List[str], ws: Path, stdin: Content = None,
     log.trace(" -> Command stdout '%s'", stdout)
     log.trace("STDOUT: %s", stdout.read_bytes())
     log.trace(" -> Command stderr '%s'", stderr)
-    log.trace("STDERR: %s", stderr.read_bytes())
+    log.trace("STDERR: %s", stderr.read_text())
 
     return CommandResult(
         exit_code=exec_result.returncode,

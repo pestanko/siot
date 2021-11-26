@@ -1,8 +1,8 @@
+import shared
 from siot import Content
-from .shared_test_init import SharedTestCase
 
 
-class TestEchoScenario(SharedTestCase):
+class TestEchoScenario(shared.SharedTestCase):
     def test_echo_hello_world(self):
         res = self.echocat.execute(args=["cat"], text="Hello world!")
 

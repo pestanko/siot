@@ -1,8 +1,8 @@
 from siot import ExecParams
-from .shared_test_init import SharedTestCase
+import shared
 
 
-class TestEchoScenario(SharedTestCase):
+class TestEchoScenario(shared.SharedTestCase):
     def test_echo_hello_world(self):
         res = self.echocat.execute(ExecParams(args=["echo", "Hello", "world"]))
 
