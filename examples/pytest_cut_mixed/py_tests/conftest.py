@@ -11,6 +11,12 @@ def _enable_logging():
     siot.load_logger()
 
 
+@pytest.fixture(scope='session', autouse=True)
+def _build_project(tmp_path_factory):
+    build = tmp_path_factory.mktemp("build")
+    siot.build_using_cmake(build)
+
+
 @pytest.fixture()
 def workspace(tmp_path: Path) -> siot.Workspace:
     # define the test workspace
@@ -27,7 +33,12 @@ def data_path() -> Path:
 
 
 @pytest.fixture()
-def echocat(workspace) -> siot.Executable:
+def mixed(workspace) -> siot.Executable:
     # Register your executable that will be used in the tests
     # The argument of the method is a location of the file
-    return workspace.executable('build/echocat')
+    return workspace.executable('build/mixed-main')
+
+
+@pytest.fixture()
+def mixed_cut(workspace) -> siot.Executable:
+    return workspace.executable('build/mixed-tests')

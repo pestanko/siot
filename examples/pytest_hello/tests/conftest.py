@@ -7,7 +7,7 @@ import siot
 
 @pytest.fixture(scope='session', autouse=True)
 def _enable_logging():
-    siot.load_logger(level='DEBUG')
+    siot.load_logger()
 
 
 @pytest.fixture()

@@ -33,6 +33,17 @@ logging.Logger.trace = log_trace
 # Base classes
 
 class Content:
+    """Wrapper over three kinds of content
+    In order to simplify comparison and definition of the stdin/out/err
+
+    it can be either:
+    - File - File representation of the file
+    - Text - text (printable/utf-8) representation of the file/content
+    - Binary - binary data
+
+    If all of them are None, the content is empty
+    """
+
     def __init__(self, text: str = None, binary: bytes = None, file: Path = None):
         self._text: str = text
         self._binary: bytes = binary
@@ -40,9 +51,20 @@ class Content:
 
     @property
     def file(self) -> Optional[Path]:
+        """Returns the file location
+        :return: None if not set or if the file does not exists
+        """
         return self._file if self._file and self._file.exists() else None
 
     def text(self, encoding='utf-8') -> Optional[str]:
+        """Gets a text representation (printable) of the content
+        If the content is file - it loads a whole file content \
+        If the content is text - it returns the text as it is
+        If the content is binary the encoding is applied and
+        tries to convert binary data to text
+        :param encoding: default is utf-8
+        :return:
+        """
         if self._text is not None:
             return self._text
         if self._binary is not None:
@@ -52,6 +74,14 @@ class Content:
         return None
 
     def binary(self, encoding='utf-8') -> Optional[bytes]:
+        """Gets a binary representation of the content
+        If the content is file - it loads a whole file content \
+        If the content is binary - it returns bytes as they are
+        If the content is text the encoding is applied and
+        tries to convert string data to bytes
+        :param encoding: default is utf-8
+        :return:
+        """
         if self._binary is not None:
             return self._binary
         if self._text is not None:
@@ -61,6 +91,9 @@ class Content:
         return None
 
     def size(self) -> int:
+        """Returns a content size
+        :return: if the content is empty, the 0 is returned
+        """
         if self.file:
             return self.file.stat().st_size
         if self._text:
@@ -69,7 +102,13 @@ class Content:
             return len(self._binary)
         return 0
 
-    def assert_content(self, other: 'Content'):
+    def assert_content(self, other: 'Content' = None, **kw) -> None:
+        """Asserts that contents are the same
+        This method works only with PyTest
+        :param other: Other Content representation
+        :param kw:
+        """
+        other = other if other else Content(**kw)
         if other.file and self.file:
             assert filecmp.cmp(str(other.file), str(self.file))
         if other._text is not None or self._text is not None:
@@ -77,14 +116,14 @@ class Content:
         if other._binary is not None or self._binary is not None:
             assert self.binary() == other.binary()
 
-    def compare_file(self, file: Union[str, Path]) -> bool:
-        return Content(file=file) == self
-
     def is_empty(self) -> bool:
-        return (not self.file and not self._text and not self._binary) or not self.binary()
-
-    def is_blank(self) -> bool:
-        return self.is_empty() or not self.text().strip()
+        """Returns whether the content is empty
+        Resolution:
+        - if all the parameters are empty (text, binary, file)
+        - if the size is empty (this method calls self.size)
+        :return: true if the content is empty
+        """
+        return (not self.file and not self._text and not self._binary) or self.size() == 0
 
     def __eq__(self, other: 'Content') -> bool:
         if other.file is not None and self.file is not None:
@@ -94,8 +133,6 @@ class Content:
     def __str__(self):
         if self.is_empty():
             return "Content::EMPTY"
-        if self.is_blank():
-            return "Content::BLANK"
         if self.file:
             return f'Content::FILE("{self.file}")'
         if self._text:
@@ -110,23 +147,56 @@ class Content:
 
 class ExecParams:
     def __init__(self, args: List[str] = None, stdin: 'Content' = None, env: Dict[str, str] = None, **kwargs):
+        """Creates an instance of the Exec parameters
+        :param args: List of executable arguments
+        :param stdin: Standard input content representation
+        :param env: Dictionary of env variables
+        :param kwargs: Other optional arguments
+        """
         self.args = [str(arg) for arg in args] if args else []
-        self.stdin: Optional[Content] = stdin
         self.env: Dict[str, str] = {k: str(v) for k, v in env.items()} if env else {}
+        self.stdin: Optional[Content] = stdin if stdin else self.resolve_content(kwargs)
         self.other = kwargs if kwargs else {}
+
+    @classmethod
+    def resolve_content(cls, kwargs) -> Optional[Content]:
+        def _resolve(name: str):
+            return Content(**{name: kwargs[name]}) if name in kwargs else None
+
+        for prop in ('text', 'binary', 'file'):
+            val = _resolve(prop)
+            if val is not None:
+                del kwargs[prop]
+                return val
+        return None
 
 
 class Workspace:
     def __init__(self, workspace: Path = None):
+        """Creates an instance of the workspace
+        workspace defines where the executable output will be stored
+        :param workspace: Location where the executable (stdout, stderr) will be stored
+        """
         self.ws_path = workspace
         self.execs: List['Executable'] = []
 
     def executable(self, path: Union[Path, str]) -> 'Executable':
+        """Register a new executable
+        :param path: Location of the executable
+        :return:
+        """
         exe = Executable(path, workspace=self)
         self.execs.append(exe)
         return exe
 
-    def execute(self, exec_path: Path, params: 'ExecParams' = None) -> 'CommandResult':
+    def execute(self, exec_path: Path, params: 'ExecParams' = None, **kw) -> 'CommandResult':
+        """Execute the command/executable and store its outputs to the workspace
+        :param exec_path: Location of the executable
+        :param params: Additional parameters (args, env, stdin)
+        :param kw: optional arguments that will be passed to the params
+        :return: Execution result
+        """
+        params = params if params else ExecParams(**kw)
         LOG.info("[EXEC] Executing \"%s\" with workspace path \"%s\"", exec_path, self.ws_path)
         params = params if params is not None else ExecParams()
         res = execute_cmd(
@@ -144,9 +214,12 @@ class Executable:
         self.exe: Path = Path(executable)
         self.workspace: Workspace = workspace
 
-    def execute(self, params: 'ExecParams' = None) -> 'CommandResult':
+    def execute(self, params: 'ExecParams' = None, args: List[str] = None,
+                stdin: Content = None, **kwargs) -> 'CommandResult':
         if not self.exe.exists():
             raise FileNotFoundError(str(self.exe))
+        if params is None:
+            params = ExecParams(args=args, stdin=stdin, **kwargs)
         return self.workspace.execute(self.exe, params)
 
 
@@ -173,6 +246,18 @@ class CommandResult:
 
     def __repr__(self) -> str:
         return str(self)
+
+
+def build_using_cmake(path: Path):
+    ws = Workspace(path)
+    res = ws.execute('cmake', args=['-Bbuild'])
+    if res.exit != 0:
+        LOG.error("Unable to build using cmake")
+        raise RuntimeError("Command failed: cmake")
+    res = ws.execute('make', args=['-Cbuild'])
+    if res.exit != 0:
+        LOG.error("Unable to build using make")
+        raise RuntimeError("Command failed: make")
 
 
 # Utils
@@ -265,7 +350,8 @@ def dict_serialize(obj, as_dict_skip: bool = False) -> Any:
     return str(obj)
 
 
-def load_logger(level: str = 'INFO', log_file: Optional[Path] = None, file_level: str = None):
+def load_logger(level: str = None, log_file: Optional[Path] = None, file_level: str = None):
+    level = level if level else os.getenv("LOG_LEVEL", "info")
     level = level.upper()
     file_level = file_level.upper() if file_level else level
     log_config = {
